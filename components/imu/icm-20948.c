@@ -128,33 +128,20 @@ esp_err_t readLastImuValues() {
         return err;
     }
 
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    err = i2c_read_register(IMU.address, ACCEL_XOUT_H, (uint8_t *) readings, 12);
 
-    //Move head
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (IMU.address << 1) | I2C_MASTER_WRITE, 1);
-    i2c_master_write_byte(cmd, ACCEL_XOUT_H, 1);
-    i2c_master_stop(cmd);
-
-    //Read sensor data
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (IMU.address << 1) | I2C_MASTER_READ, 1);
-    i2c_master_read(cmd, (uint8_t *) readings, 12, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
-
-    //Commit
-    err = i2c_commit(cmd, 10);
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return err;
     }
 
-    //Store readings
-    for (int i = 0; i < 12; ++i) {
-        printf("%d--", readings[i]);
-    }
-    printf("\n");
+
     IMU.accX = (readings[0] << 8) | readings[1];
+    IMU.accY = (readings[2] << 8) | readings[3];
+    IMU.accZ = (readings[4] << 8) | readings[5];
+    IMU.gyX = (readings[6] << 8) | readings[7];
+    IMU.gyY = (readings[8] << 8) | readings[9];
+    IMU.gyZ = (readings[10] << 8) | readings[11];
 
     return err;
 }

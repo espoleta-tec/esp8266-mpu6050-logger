@@ -34,14 +34,16 @@ void app_main(void) {
 
 
     while (true) {
-//        err = readLastImuValues();
-//        if (err != ESP_OK) {
-//            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-//            return;
-//        }
-//        printf("%10d%10d%10d\n", IMU.accX, IMU.accY, IMU.accZ);
+        err = readLastImuValues();
+        if (err != ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+            return;
+        }
+        printf("%10d%10d%10d%10d%10d%10d\n",
+               IMU.accX, IMU.accY, IMU.accZ,
+               IMU.gyX, IMU.gyY, IMU.gyZ);
 
-        vTaskDelay(100 / portTICK_RATE_MS);
+        vTaskDelay(1 / portTICK_RATE_MS);
     }
 
 //    xTaskCreate(mpuReaderTask, IMU_READER_TAG, 2040, NULL, 10, NULL);
