@@ -17,7 +17,7 @@
 
 esp_err_t initImu(uint8_t address);
 
-esp_err_t readLastImuValues();
+esp_err_t imu_read_sensor();
 
 typedef struct T_IMU {
     uint8_t address;

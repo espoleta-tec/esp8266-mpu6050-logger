@@ -104,7 +104,7 @@ esp_err_t initImu(uint8_t address) {
         return err;
     }
 
-    vTaskDelay(10 / portTICK_RATE_MS);
+    vTaskDelay(1000 / portTICK_RATE_MS);
 
     err = wakeUp();
     if (err != ESP_OK) {
@@ -115,7 +115,7 @@ esp_err_t initImu(uint8_t address) {
     return err;
 }
 
-esp_err_t readLastImuValues() {
+esp_err_t imu_read_sensor() {
     esp_err_t err;
 
     const uint8_t readings[12] = {0};
@@ -204,27 +204,9 @@ esp_err_t selectBank(uint8_t bank) {
 
 esp_err_t wakeUp() {
     esp_err_t err;
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-
-    //Move head
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (IMU.address << 1) | I2C_MASTER_WRITE, 1);
-    i2c_master_write_byte(cmd, PWR_MGMT_1 | I2C_MASTER_WRITE, 1);
-    i2c_master_stop(cmd);
-
-    cmd = i2c_commit_and_create(cmd, 10, &err);
-    if (err != ESP_OK) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        return err;
-    }
-
-    //Read register
     uint8_t powerManagementReg = 0;
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (IMU.address << 1) | I2C_MASTER_READ, 1);
-    i2c_master_read_byte(cmd, &powerManagementReg, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
-    cmd = i2c_commit_and_create(cmd, 10, &err);
+
+    err = i2c_read_register(IMU.address, PWR_MGMT_1, &powerManagementReg, 1);
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return err;
@@ -235,16 +217,7 @@ esp_err_t wakeUp() {
     printf("reggie will be: %x", powerManagementReg);
     fflush(stdout);
 
-
-
-    //Write new register value
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (IMU.address << 1) | I2C_MASTER_WRITE, 1);
-    i2c_master_write_byte(cmd, PWR_MGMT_1, 1);
-    i2c_master_write_byte(cmd, powerManagementReg, 1);
-    i2c_master_stop(cmd);
-
-    err = i2c_commit(cmd, 10);
+    err = i2c_write_register(IMU.address, PWR_MGMT_1, powerManagementReg);
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return err;

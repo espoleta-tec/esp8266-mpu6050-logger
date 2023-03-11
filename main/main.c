@@ -1,3 +1,4 @@
+#include <sys/cdefs.h>
 /* I2C example
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
@@ -8,6 +9,7 @@
 */
 
 
+#include "freertos/FreeRTOSConfig.h"
 
 
 #include "i2c_utils.h"
@@ -16,31 +18,70 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "rom/ets_sys.h"
+#include "esp_log.h"
+#include "driver/hw_timer.h"
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
+#include "freertos/timers.h"
 
 #define IMU_ADDRESS 0x68
 
-const char *IMU_READER_TAG = "IMU_TASK";
+const char *MAIN_TAG = "ESP8266";
+static uint32_t count = 0;
 
-void printTask(void *ignore) {
-    esp_err_t err;
-    uint32_t count = 0, lastCount = 0;
+static SemaphoreHandle_t sem_done_reading = NULL;
+static QueueHandle_t msgQueue;
 
+const char *PRINT_DATA_TASK_LABEL = "PRINT DATA";
+
+_Noreturn void task_print_data(void *ignore) {
     while (1) {
-        count++;
-        err = readLastImuValues();
-        if (err != ESP_OK) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-            return;
-        }
-        if (count - lastCount > 1000) {
-            printf("%10d\n", count);
-            fflush(stdout);
-            lastCount = count;
-        }
-//        printf("%10d%10d%10d%10d%10d%10d%10u\n",
-//               IMU.accX, IMU.accY, IMU.accZ,
-//               IMU.gyX, IMU.gyY, IMU.gyZ, count);
-        vTaskDelay(1);
+        printf("%10d%10d%10d%10d%10d%10d%10u\n",
+               IMU.accX, IMU.accY, IMU.accZ,
+               IMU.gyX, IMU.gyY, IMU.gyZ, count);
+        vTaskDelay(10 / portTICK_RATE_MS);
+    }
+}
+
+const char *READ_IMU_TASK_LABEL = "IMU_TASK";
+
+TaskHandle_t readImuTaskHandle;
+
+
+//void task_read_imu(void *ignore) {
+//
+//    while (1) {
+//        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+//
+//        esp_err_t err;
+//        err = imu_read_sensor();
+//        if (err != ESP_OK) {
+//            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+//            return;
+//        }
+//        xSemaphoreGive(sem_done_reading);
+////        count++;
+//    }
+//}
+
+void pendable_imu_read(void *pvParameter, uint32_t ulParameter2) {
+    esp_err_t err;
+    err = imu_read_sensor();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return;
+    }
+}
+
+
+void read_imu_timer_callback() {
+    BaseType_t taskWoken = pdFALSE;
+
+    count++;
+    xTimerPendFunctionCallFromISR(pendable_imu_read, (void *) 0, 0, &taskWoken);
+
+    if (taskWoken) {
+        portYIELD_FROM_ISR();
     }
 }
 
@@ -48,13 +89,25 @@ void app_main(void) {
     esp_err_t err;
     init_i2c();
     fflush(stdout);
-    printf("Reading imu\n");
+    ESP_LOGI(MAIN_TAG, "Freertos Tick Rate: %d\n", configTICK_RATE_HZ);
 
     err = initImu(IMU_ADDRESS);
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return;
-    }
+    };
 
-    xTaskCreate(printTask, IMU_READER_TAG, 2040, NULL, 10, NULL);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(MAIN_TAG, "Starting tasks\n");
+
+//    xTaskCreate(task_read_imu, READ_IMU_TASK_LABEL, 1024, NULL, 1, &readImuTaskHandle);
+    xTaskCreate(task_print_data, PRINT_DATA_TASK_LABEL, 1024, NULL, 2, NULL);
+
+    ESP_LOGI(MAIN_TAG, "Initializing hw_timer");
+    hw_timer_init(read_imu_timer_callback, NULL);
+    ESP_LOGI(MAIN_TAG, "Setting IMU read to 50us intervals");
+    hw_timer_alarm_us(100, true);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
 }
