@@ -23,6 +23,8 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/timers.h"
+#include "logger.h"
+#include "stdlib.h"
 
 #define IMU_ADDRESS 0x68
 
@@ -54,7 +56,7 @@ TaskHandle_t readImuTaskHandle;
 //        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 //
 //        esp_err_t err;
-//        err = imu_read_sensor();
+//        err = imu_read_sensors();
 //        if (err != ESP_OK) {
 //            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
 //            return;
@@ -66,18 +68,18 @@ TaskHandle_t readImuTaskHandle;
 
 void pendable_imu_read(void *pvParameter, uint32_t ulParameter2) {
     esp_err_t err;
-    err = imu_read_sensor();
+    err = imu_read_sensors();
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return;
     }
+    count++;
 }
 
 
 void read_imu_timer_callback() {
     BaseType_t taskWoken = pdFALSE;
 
-    count++;
     xTimerPendFunctionCallFromISR(pendable_imu_read, (void *) 0, 0, &taskWoken);
 
     if (taskWoken) {
@@ -89,7 +91,9 @@ void app_main(void) {
     esp_err_t err;
     init_i2c();
     fflush(stdout);
-    ESP_LOGI(MAIN_TAG, "Freertos Tick Rate: %d\n", configTICK_RATE_HZ);
+    ESP_LOGI(MAIN_TAG, "Starting system");
+
+    logger_print_status_header();
 
     err = initImu(IMU_ADDRESS);
     if (err != ESP_OK) {
@@ -97,17 +101,27 @@ void app_main(void) {
         return;
     };
 
+
+    return;
+
+    const uint32_t imuReadPeriodUs = 4000;
+    err = hw_timer_init(read_imu_timer_callback, NULL);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return;
+    }
+
+    err = hw_timer_alarm_us(imuReadPeriodUs, true);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return;
+    }
+
+
+    logger_print_statusf("IMU Read Interval", "%dus", imuReadPeriodUs);
+
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    ESP_LOGI(MAIN_TAG, "Starting tasks\n");
-
-//    xTaskCreate(task_read_imu, READ_IMU_TASK_LABEL, 1024, NULL, 1, &readImuTaskHandle);
+    //Spawning processes
     xTaskCreate(task_print_data, PRINT_DATA_TASK_LABEL, 1024, NULL, 2, NULL);
-
-    ESP_LOGI(MAIN_TAG, "Initializing hw_timer");
-    hw_timer_init(read_imu_timer_callback, NULL);
-    ESP_LOGI(MAIN_TAG, "Setting IMU read to 50us intervals");
-    hw_timer_alarm_us(100, true);
-    vTaskDelay(pdMS_TO_TICKS(10));
-
 }

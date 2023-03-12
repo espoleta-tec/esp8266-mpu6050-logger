@@ -10,6 +10,8 @@
 #include "i2c_utils.h"
 #include "driver/i2c.h"
 #include "freertos/task.h"
+#include "logger.h"
+#include "utils.h"
 
 //Registers
 //Bank_0
@@ -69,6 +71,23 @@
 #define EXT_SLV_SENS_DATA_22 0x51
 #define EXT_SLV_SENS_DATA_23 0x52
 
+//User Bank 1
+#define SELF_TEST_X_GYRO 0x02
+#define SELF_TEST_Y_GYRO 0x03
+#define SELF_TEST_Z_GYRO 0x04
+#define SELF_TEST_X_ACCEL 0x0E
+#define SELF_TEST_Y_ACCEL 0x0F
+#define SELF_TEST_Z_ACCEL 0x10
+
+
+//User Bank 2
+#define GYRO_SMPLRT_DIV 0x00
+#define GYRO_CONFIG_1 0x01
+#define GYRO_CONFIG_2 0x02
+#define ACCEL_CONFIG 0x14
+#define ACCEL_CONFIG_2 0x15
+
+
 //Common
 #define FIFO_EN_1 0x66
 
@@ -80,6 +99,14 @@ static esp_err_t selectBank(uint8_t bank);
 static esp_err_t wakeUp();
 
 static esp_err_t reset();
+
+static esp_err_t config_accel();
+
+static esp_err_t config_gyro();
+
+static esp_err_t config_mag();
+
+static esp_err_t self_test();
 
 //definitions
 
@@ -112,10 +139,28 @@ esp_err_t initImu(uint8_t address) {
         return err;
     }
 
+    err = config_gyro();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    err = config_accel();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    err = self_test();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
     return err;
 }
 
-esp_err_t imu_read_sensor() {
+esp_err_t imu_read_sensors() {
     esp_err_t err;
 
     const uint8_t readings[12] = {0};
@@ -136,12 +181,12 @@ esp_err_t imu_read_sensor() {
     }
 
 
-    IMU.accX = (readings[0] << 8) | readings[1];
-    IMU.accY = (readings[2] << 8) | readings[3];
-    IMU.accZ = (readings[4] << 8) | readings[5];
-    IMU.gyX = (readings[6] << 8) | readings[7];
-    IMU.gyY = (readings[8] << 8) | readings[9];
-    IMU.gyZ = (readings[10] << 8) | readings[11];
+    IMU.accX = (((int16_t) readings[0]) << 8) | readings[1];
+    IMU.accY = (((int16_t) readings[2]) << 8) | readings[3];
+    IMU.accZ = (((int16_t) readings[4]) << 8) | readings[5];
+    IMU.gyX = (((int16_t) readings[6]) << 8) | readings[7];
+    IMU.gyY = (((int16_t) readings[8]) << 8) | readings[9];
+    IMU.gyZ = (((int16_t) readings[10]) << 8) | readings[11];
 
     return err;
 }
@@ -212,10 +257,7 @@ esp_err_t wakeUp() {
         return err;
     }
 
-    printf("reggie is: %x", powerManagementReg);
     powerManagementReg = powerManagementReg & 0xbf;
-    printf("reggie will be: %x", powerManagementReg);
-    fflush(stdout);
 
     err = i2c_write_register(IMU.address, PWR_MGMT_1, powerManagementReg);
     if (err != ESP_OK) {
@@ -237,6 +279,229 @@ esp_err_t reset() {
     vTaskDelay(1 / portTICK_RATE_MS);
 
     return ESP_OK;
+}
+
+typedef enum {
+    ACCEL_FS_SEL_2G = 0 << 1,
+    ACCEL_FS_SEL_4G = 1 << 1,
+    ACCEL_FS_SEL_8G = 2 << 1,
+    ACCEL_FS_SEL_16G = 3 << 1,
+} accel_fs_sel;
+
+typedef enum {
+    ACCEL_FCHOICE_DISABLE,
+    ACCEL_FCHOICE_ENABLE
+} accel_fchoice;
+
+typedef enum {
+    ACCEL_DLPFCFG_0 = 0 << 3,
+    ACCEL_DLPFCFG_1 = 1 << 3,
+    ACCEL_DLPFCFG_2 = 2 << 3,
+    ACCEL_DLPFCFG_3 = 3 << 3,
+    ACCEL_DLPFCFG_4 = 4 << 3,
+    ACCEL_DLPFCFG_5 = 5 << 3,
+    ACCEL_DLPFCFG_6 = 6 << 3,
+    ACCEL_DLPFCFG_7 = 7 << 3,
+};
+
+esp_err_t config_accel() {
+    esp_err_t err;
+
+    uint8_t accelConfigReg;
+
+    err = i2c_read_register(IMU.address, ACCEL_CONFIG, &accelConfigReg, 1);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    accelConfigReg = utils_bit_mask(accelConfigReg, 0x76, &err);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    accelConfigReg = accelConfigReg | ACCEL_DLPFCFG_0 | ACCEL_FS_SEL_2G | ACCEL_FCHOICE_ENABLE;
+
+    err = i2c_write_register(IMU.address, ACCEL_CONFIG, accelConfigReg);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    return err;
+}
+
+
+typedef enum {
+    GYRO_F_DISABLE, //Disable low pass filter
+    GYRO_F_ENABLE //Enable low pass filter
+} gyro_fchoice;
+
+typedef enum {
+    GYRO_FS_250 = 0 << 1,
+    GYRO_FS_500 = 1 << 1,
+    GYRO_FS_1000 = 2 << 1,
+    GYRO_FS_2000 = 3 << 1,
+} gyro_fs_sel;
+
+typedef enum {
+    GYRO_DLPFCFG_0 = 0 << 3,
+    GYRO_DLPFCFG_1 = 1 << 3,
+    GYRO_DLPFCFG_2 = 2 << 3,
+    GYRO_DLPFCFG_3 = 2 << 3,
+    GYRO_DLPFCFG_4 = 4 << 3,
+    GYRO_DLPFCFG_5 = 5 << 3,
+    GYRO_DLPFCFG_6 = 6 << 3,
+    GYRO_DLPFCFG_7 = 7 << 3,
+} gyro_dlpfcfg;
+
+esp_err_t config_gyro() {
+    esp_err_t err;
+    uint8_t gyroConfig1Reg;
+
+
+    err = selectBank(2);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    err = i2c_read_register(IMU.address, GYRO_CONFIG_1, &gyroConfig1Reg, 1);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    gyroConfig1Reg = gyroConfig1Reg & 0x80;
+    gyroConfig1Reg = gyroConfig1Reg | GYRO_DLPFCFG_1 | GYRO_FS_1000 | GYRO_F_ENABLE;
+
+    err = i2c_write_register(IMU.address, GYRO_CONFIG_1, gyroConfig1Reg);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    logger_print_statusf("Gyro configuration", "%d", gyroConfig1Reg);
+
+
+    return err;
+}
+
+esp_err_t config_mag() {
+    return 0;
+}
+
+typedef enum {
+    AX_ST_EN_REG_DISABLE = 0 << 4,
+    AX_ST_EN_REG_ENABLE = 1 << 4,
+} ax_st_en_reg;
+
+typedef enum {
+    AY_ST_EN_REG_DISABLE = 0 << 3,
+    AY_ST_EN_REG_ENABLE = 1 << 3,
+} ay_st_en_reg;
+
+typedef enum {
+    AZ_ST_EN_REG_DISABLE = 0 << 2,
+    AZ_ST_EN_REG_ENABLE = 1 << 2,
+} az_st_en_reg;
+
+typedef enum {
+    DEC3_CFG_1_4,
+    DEC3_CFG_8,
+    DEC3_CFG_16,
+    DEC3_CFG_32,
+} dec3_cfg;
+
+esp_err_t self_test() {
+    esp_err_t err;
+    uint8_t accelConfig2Register;
+
+    err = selectBank(2);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    err = i2c_read_register(IMU.address, ACCEL_CONFIG_2, &accelConfig2Register, 1);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    accelConfig2Register = utils_bit_mask(accelConfig2Register, 0x75, &err);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    //Enable self test
+    accelConfig2Register = accelConfig2Register | AX_ST_EN_REG_ENABLE | AY_ST_EN_REG_ENABLE | AZ_ST_EN_REG_ENABLE;
+    err = i2c_write_register(IMU.address, ACCEL_CONFIG_2, accelConfig2Register);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    //read with self test enabled
+    err = imu_read_sensors();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    uint16_t testX = IMU.accX, testY = IMU.accY, testZ = IMU.accZ;
+
+    accelConfig2Register = utils_bit_mask(accelConfig2Register, 0x76, &err);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    //disable self test
+    err = i2c_write_register(IMU.address, ACCEL_CONFIG_2, accelConfig2Register);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    //Read with self test disabled
+    err = imu_read_sensors();
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    //Read self test references
+    err = selectBank(1);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    uint8_t selfTestGyroRef[3], selfTestAccelRef[3];
+    err = i2c_read_register(IMU.address, SELF_TEST_X_GYRO, selfTestGyroRef, 3);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    err = i2c_read_register(IMU.address, SELF_TEST_X_ACCEL, selfTestAccelRef, 3);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    logger_print_statusf("Self Test Response X", "%d --- Expected: %d",
+                         testX - IMU.accX, selfTestAccelRef[0]);
+    logger_print_statusf("Self Test Response Y", "%d --- Expected: %d",
+                         testY - IMU.accY, selfTestAccelRef[1]);
+    logger_print_statusf("Self Test Response Z", "%d --- Expected: %d",
+                         testZ - IMU.accZ, selfTestAccelRef[2]);
+
+
+    return err;
 }
 
 #endif
