@@ -373,8 +373,13 @@ esp_err_t config_gyro() {
         return err;
     }
 
-    gyroConfig1Reg = gyroConfig1Reg & 0x80;
-    gyroConfig1Reg = gyroConfig1Reg | GYRO_DLPFCFG_1 | GYRO_FS_1000 | GYRO_F_ENABLE;
+    gyroConfig1Reg = utils_bit_mask(gyroConfig1Reg, 0x76, &err);
+    if (err != ESP_OK) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+        return err;
+    }
+
+    gyroConfig1Reg = gyroConfig1Reg | GYRO_DLPFCFG_0 | GYRO_FS_250 | GYRO_F_ENABLE;
 
     err = i2c_write_register(IMU.address, GYRO_CONFIG_1, gyroConfig1Reg);
     if (err != ESP_OK) {
@@ -451,7 +456,7 @@ esp_err_t self_test() {
         return err;
     }
 
-    uint16_t testX = IMU.accX, testY = IMU.accY, testZ = IMU.accZ;
+    int16_t testX = IMU.accX, testY = IMU.accY, testZ = IMU.accZ;
 
     accelConfig2Register = utils_bit_mask(accelConfig2Register, 0x76, &err);
     if (err != ESP_OK) {
@@ -459,7 +464,7 @@ esp_err_t self_test() {
         return err;
     }
 
-    //disable self test
+    //Disable self test
     err = i2c_write_register(IMU.address, ACCEL_CONFIG_2, accelConfig2Register);
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);

@@ -21,12 +21,12 @@ esp_err_t imu_read_sensors();
 
 typedef struct T_IMU {
     uint8_t address;
-    uint16_t accX;
-    uint16_t accY;
-    uint16_t accZ;
-    uint16_t gyX;
-    uint16_t gyY;
-    uint16_t gyZ;
+    int16_t accX;
+    int16_t accY;
+    int16_t accZ;
+    int16_t gyX;
+    int16_t gyY;
+    int16_t gyZ;
 } T_IMU;
 
 extern T_IMU IMU;

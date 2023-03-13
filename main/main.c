@@ -20,72 +20,32 @@
 #include "rom/ets_sys.h"
 #include "esp_log.h"
 #include "driver/hw_timer.h"
-#include "freertos/semphr.h"
-#include "freertos/queue.h"
-#include "freertos/timers.h"
+
 #include "logger.h"
 #include "stdlib.h"
+#include "driver/gpio.h"
+#include "adc_ctl.h"
+#include "imu_read_ctl.h"
+#include "config.h"
 
-#define IMU_ADDRESS 0x68
 
+// Definitions
 const char *MAIN_TAG = "ESP8266";
 static uint32_t count = 0;
-
-static SemaphoreHandle_t sem_done_reading = NULL;
-static QueueHandle_t msgQueue;
 
 const char *PRINT_DATA_TASK_LABEL = "PRINT DATA";
 
 _Noreturn void task_print_data(void *ignore) {
     while (1) {
-        printf("%10d%10d%10d%10d%10d%10d%10u\n",
-               IMU.accX, IMU.accY, IMU.accZ,
-               IMU.gyX, IMU.gyY, IMU.gyZ, count);
+        if (hw_timer_get_enable()) {
+            printf("%10d%10d%10d%10d%10d%10d%10u\n",
+                   IMU.accX, IMU.accY, IMU.accZ,
+                   IMU.gyX, IMU.gyY, IMU.gyZ, count);
+        }
         vTaskDelay(10 / portTICK_RATE_MS);
     }
 }
 
-const char *READ_IMU_TASK_LABEL = "IMU_TASK";
-
-TaskHandle_t readImuTaskHandle;
-
-
-//void task_read_imu(void *ignore) {
-//
-//    while (1) {
-//        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//        esp_err_t err;
-//        err = imu_read_sensors();
-//        if (err != ESP_OK) {
-//            ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-//            return;
-//        }
-//        xSemaphoreGive(sem_done_reading);
-////        count++;
-//    }
-//}
-
-void pendable_imu_read(void *pvParameter, uint32_t ulParameter2) {
-    esp_err_t err;
-    err = imu_read_sensors();
-    if (err != ESP_OK) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        return;
-    }
-    count++;
-}
-
-
-void read_imu_timer_callback() {
-    BaseType_t taskWoken = pdFALSE;
-
-    xTimerPendFunctionCallFromISR(pendable_imu_read, (void *) 0, 0, &taskWoken);
-
-    if (taskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
 
 void app_main(void) {
     esp_err_t err;
@@ -95,33 +55,34 @@ void app_main(void) {
 
     logger_print_status_header();
 
-    err = initImu(IMU_ADDRESS);
-    if (err != ESP_OK) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-        return;
-    };
+    //Configure GPIO
+    gpio_config_t io_conf;
+    //disable interrupt
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    //bit mask of the pins that you want to set, e.g.GPIO15/16
+    io_conf.pin_bit_mask = GPIO_OUTPUT_MASK;
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+
+    gpio_set_level(LED_PIN, 1);
 
 
-    return;
-
-    const uint32_t imuReadPeriodUs = 4000;
-    err = hw_timer_init(read_imu_timer_callback, NULL);
+    err = imu_monitor_config();
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return;
     }
 
-    err = hw_timer_alarm_us(imuReadPeriodUs, true);
+    err = adc_config();
     if (err != ESP_OK) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(err);
         return;
     }
-
-
-    logger_print_statusf("IMU Read Interval", "%dus", imuReadPeriodUs);
-
-    vTaskDelay(pdMS_TO_TICKS(10));
 
     //Spawning processes
     xTaskCreate(task_print_data, PRINT_DATA_TASK_LABEL, 1024, NULL, 2, NULL);
+    xTaskCreate(task_read_adc, READ_ADC_TASK_LABEL, 1024, NULL, 4, NULL);
 }
